@@ -1,4 +1,4 @@
-module reverse-grpc
+module github.com/svenwiltink/reversegrpc
 
 go 1.16
 

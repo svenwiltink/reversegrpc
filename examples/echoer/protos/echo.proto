@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+option go_package = "github.com/svenwiltink/reverse-grpc/examples/echoer/protos";
+package proto;
+
+// Echoer service
+service Echoer {
+  // Echo back the message, prefixed with some worker information
+  rpc Echo (EchoRequest) returns (EchoReply) {}
+}
+
+message EchoRequest {
+  string message = 1;
+}
+
+message EchoReply {
+  string message = 1;
+}
