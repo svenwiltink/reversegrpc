@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"log"
-	"time"
+	"os"
+	"sync"
 
 	"github.com/svenwiltink/reversegrpc"
 	pb "github.com/svenwiltink/reversegrpc/examples/shell/protos"
@@ -13,6 +15,63 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 )
+
+type CNC struct {
+	Workers    map[int]pb.ExecutorClient
+	mut        *sync.Mutex
+	Controller *reversegrpc.Controller
+}
+
+func (c *CNC) Run() {
+	err := c.Controller.Listen(*addr)
+	if err != nil {
+		panic(err)
+	}
+
+	clientID := 0
+
+	for {
+		clientConn, err := c.Controller.Accept(grpc.WithTransportCredentials(insecure.NewCredentials()))
+
+		if err != nil {
+			log.Fatalf("did not 'connect': %v", err)
+		}
+
+		clientID++
+
+		c.handleConn(clientConn, clientID)
+	}
+}
+
+func (c *CNC) Exec(cmd string) {
+	c.mut.Lock()
+	defer c.mut.Unlock()
+
+	for clientID, worker := range c.Workers {
+		response, err := worker.Exec(context.Background(), &pb.ExecRequest{Command: "sh", Args: []string{"-c", cmd}})
+		if err != nil {
+			stat, _ := status.FromError(err)
+			if stat.Code() == codes.Canceled {
+				log.Println("worker disconnected, removing connection")
+				delete(c.Workers, clientID)
+				return
+			}
+			log.Fatalln(err)
+		}
+
+		log.Printf("client %d response: ExitCode %d Output %#v StdErr %#v", clientID, response.Exitcode, response.Stdout, response.Stderr)
+	}
+}
+
+func (c *CNC) handleConn(clientConn *grpc.ClientConn, clientID int) {
+	log.Println("client connected")
+
+	c.mut.Lock()
+	defer c.mut.Unlock()
+
+	client := pb.NewExecutorClient(clientConn)
+	c.Workers[clientID] = client
+}
 
 var (
 	addr = flag.String("addr", "localhost:50051", "the address to listen on")
@@ -23,41 +82,18 @@ func main() {
 	flag.Parse()
 
 	controller := reversegrpc.Controller{}
-	controller.Listen(*addr)
-	clientID := 0
-
-	for {
-		clientConn, err := controller.Accept(grpc.WithTransportCredentials(insecure.NewCredentials()))
-
-		if err != nil {
-			log.Fatalf("did not 'connect': %v", err)
-		}
-
-		clientID++
-
-		go handleConn(clientConn, clientID)
+	cnc := CNC{
+		Workers:    make(map[int]pb.ExecutorClient),
+		Controller: &controller,
+		mut:        &sync.Mutex{},
 	}
-}
 
-func handleConn(clientConn *grpc.ClientConn, clientID int) {
-	defer clientConn.Close()
-	c := pb.NewExecutorClient(clientConn)
+	go cnc.Run()
 
-	for range time.NewTicker(5 * time.Second).C {
-		r, err := c.Exec(context.TODO(), &pb.ExecRequest{Command: "hostname", Args: []string{"-f"}})
-		if err != nil {
-			stat, _ := status.FromError(err)
-			if stat.Code() == codes.Canceled {
-				log.Printf("worker %d disconnected, removing connection", clientID)
-				return
-			}
-			log.Fatalln(err)
-		}
-
-		if err != nil {
-			log.Fatalf("could not echo: %v", err)
-		}
-
-		log.Printf("client %d response:\nexitcode: %d\nstdout: %#v\nstderr: %#v\n", clientID, r.Exitcode, r.Stdout, r.Stderr)
+	reader := bufio.NewScanner(os.Stdin)
+	for reader.Scan() {
+		cmd := reader.Text()
+		cnc.Exec(cmd)
 	}
+
 }
