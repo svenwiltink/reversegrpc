@@ -63,10 +63,6 @@ type callbackCloser struct {
 }
 
 func (c callbackCloser) Close() error {
-	var err error
-	c.once.Do(func() {
-		c.callback()
-		err = c.Conn.Close()
-	})
-	return err
+	c.once.Do(c.callback)
+	return c.Conn.Close()
 }
