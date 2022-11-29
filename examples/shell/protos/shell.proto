@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+option go_package = "github.com/svenwiltink/reverse-grpc/examples/shell/protos";
+package proto;
+
+service Executor {
+  rpc Exec (ExecRequest) returns (ExecResponse) {}
+}
+
+message ExecRequest {
+  string command = 1;
+  repeated string args = 2;
+}
+
+message ExecResponse {
+  int64 exitcode = 1;
+  string stdout = 2;
+  string stderr = 3;
+}
